@@ -30,7 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	"github.com/prometheus/exporter-toolkit/web"
-	"github.com/prometheus/node_exporter/collector"
+	"github.com/zl21st/node_exporter/collector"
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
