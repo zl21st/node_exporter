@@ -17,6 +17,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-kit/kit/log"
@@ -76,6 +77,8 @@ func registerCollector(collector string, isDefaultEnabled bool, factory func(log
 type NodeCollector struct {
 	Collectors map[string]Collector
 	logger     log.Logger
+	concurrent bool
+	sleep      time.Duration
 }
 
 // DisableDefaultCollectors sets the collector state to false for all collectors which
@@ -101,7 +104,7 @@ func collectorFlagAction(collector string) func(ctx *kingpin.ParseContext) error
 }
 
 // NewNodeCollector creates a new NodeCollector.
-func NewNodeCollector(logger log.Logger, filters ...string) (*NodeCollector, error) {
+func NewNodeCollector(logger log.Logger, concurrent bool, sleep time.Duration, filters ...string) (*NodeCollector, error) {
 	f := make(map[string]bool)
 	for _, filter := range filters {
 		enabled, exist := collectorState[filter]
@@ -125,7 +128,7 @@ func NewNodeCollector(logger log.Logger, filters ...string) (*NodeCollector, err
 			}
 		}
 	}
-	return &NodeCollector{Collectors: collectors, logger: logger}, nil
+	return &NodeCollector{Collectors: collectors, logger: logger, concurrent: concurrent, sleep: sleep}, nil
 }
 
 // Describe implements the prometheus.Collector interface.
@@ -136,9 +139,32 @@ func (n NodeCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect implements the prometheus.Collector interface.
 func (n NodeCollector) Collect(ch chan<- prometheus.Metric) {
+	if n.concurrent {
+		n.collectConcurrent(ch)
+	} else {
+		n.collect(ch)
+	}
+}
+
+func (n NodeCollector) collect(ch chan<- prometheus.Metric) {
 	for name, c := range n.Collectors {
 		execute(name, c, ch, n.logger)
+		if n.sleep > 0 {
+			time.Sleep(n.sleep)
+		}
 	}
+}
+
+func (n NodeCollector) collectConcurrent(ch chan<- prometheus.Metric) {
+	wg := sync.WaitGroup{}
+	wg.Add(len(n.Collectors))
+	for name, c := range n.Collectors {
+		go func(name string, c Collector) {
+			execute(name, c, ch, n.logger)
+			wg.Done()
+		}(name, c)
+	}
+	wg.Wait()
 }
 
 func execute(name string, c Collector, ch chan<- prometheus.Metric, logger log.Logger) {
